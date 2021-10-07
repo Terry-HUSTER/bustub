@@ -152,6 +152,11 @@ class BufferPoolManager {
    */
   void FlushAllPagesImpl();
 
+  bool AllocateFrame(frame_id_t *frame_id);
+  bool PinPageByFrameId(frame_id_t frame_id);
+  bool UnpinPageByFrameId(frame_id_t frame_id);
+  void ResetPageMetadata(Page *page);
+
   /** Number of pages in the buffer pool. */
   size_t pool_size_;
   /** Array of buffer pool pages. */
