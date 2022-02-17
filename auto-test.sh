@@ -74,7 +74,6 @@ case $project in
     run ./test/starter_test
   ;;
   *)
-    echo "This script should be put in build/"
     echo "Please input correct project number."
     echo "SYNOPSIS"
     echo "  ./auto-test [-p proj#] [-f]"
