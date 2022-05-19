@@ -62,14 +62,15 @@ class BPlusTreePage {
 
   void SetLSN(lsn_t lsn = INVALID_LSN);
 
- private:
+  // 封装后的操作函数用起来比较麻烦，干脆改成 protect 了
+ protected:
   // member variable, attributes that both internal and leaf page share
-  IndexPageType page_type_ __attribute__((__unused__));
-  lsn_t lsn_ __attribute__((__unused__));
-  int size_ __attribute__((__unused__));
-  int max_size_ __attribute__((__unused__));
-  page_id_t parent_page_id_ __attribute__((__unused__));
-  page_id_t page_id_ __attribute__((__unused__));
+  IndexPageType page_type_;
+  lsn_t lsn_;
+  int size_;
+  int max_size_;
+  page_id_t parent_page_id_;
+  page_id_t page_id_;
 };
 
 }  // namespace bustub
