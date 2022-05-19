@@ -104,6 +104,8 @@ class BPlusTree {
 
   void UpdateRootPageId(int insert_record = 0);
 
+  void DeleteEntry(BPlusTreePage *node, KeyType key, Transaction *transaction);
+
   /* Debug Routines for FREE!! */
   void ToGraph(BPlusTreePage *page, BufferPoolManager *bpm, std::ofstream &out) const;
 
@@ -116,6 +118,7 @@ class BPlusTree {
   KeyComparator comparator_;
   int leaf_max_size_;
   int internal_max_size_;
+  std::mutex mutex_;
 };
 
 }  // namespace bustub

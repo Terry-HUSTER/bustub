@@ -161,14 +161,24 @@ void B_PLUS_TREE_INTERNAL_PAGE_TYPE::CopyNFrom(MappingType *items, int size, Buf
  * NOTE: store key&value pair continuously after deletion
  */
 INDEX_TEMPLATE_ARGUMENTS
-void B_PLUS_TREE_INTERNAL_PAGE_TYPE::Remove(int index) {}
+void B_PLUS_TREE_INTERNAL_PAGE_TYPE::Remove(int index) {
+  // 集体前移一位
+  // LOG_DEBUG("internal page %d remove key %ld value %d size %d", page_id_, array[index].first.ToString(), (int)array[index].second, size_);
+  std::move(array + index + 1, array + size_, array + index);
+  size_--;
+}
 
 /*
  * Remove the only key & value pair in internal page and return the value
  * NOTE: only call this method within AdjustRoot()(in b_plus_tree.cpp)
  */
 INDEX_TEMPLATE_ARGUMENTS
-ValueType B_PLUS_TREE_INTERNAL_PAGE_TYPE::RemoveAndReturnOnlyChild() { return INVALID_PAGE_ID; }
+ValueType B_PLUS_TREE_INTERNAL_PAGE_TYPE::RemoveAndReturnOnlyChild() {
+  // 删除唯一的子节点，然后返回
+  assert(size_ == 1);
+  size_ = 0;
+  return array[0].second;
+}
 /*****************************************************************************
  * MERGE
  *****************************************************************************/
@@ -181,7 +191,13 @@ ValueType B_PLUS_TREE_INTERNAL_PAGE_TYPE::RemoveAndReturnOnlyChild() { return IN
  */
 INDEX_TEMPLATE_ARGUMENTS
 void B_PLUS_TREE_INTERNAL_PAGE_TYPE::MoveAllTo(BPlusTreeInternalPage *recipient, const KeyType &middle_key,
-                                               BufferPoolManager *buffer_pool_manager) {}
+                                               BufferPoolManager *buffer_pool_manager) {
+  array[0].first = middle_key;
+  std::move(array, array + size_, recipient->array + recipient->size_);
+  recipient->BatchChangeChildParentId(recipient->size_, recipient->size_ + size_, buffer_pool_manager);
+  recipient->size_ += size_;
+  size_ = 0;
+}
 
 /*****************************************************************************
  * REDISTRIBUTE
@@ -196,7 +212,14 @@ void B_PLUS_TREE_INTERNAL_PAGE_TYPE::MoveAllTo(BPlusTreeInternalPage *recipient,
  */
 INDEX_TEMPLATE_ARGUMENTS
 void B_PLUS_TREE_INTERNAL_PAGE_TYPE::MoveFirstToEndOf(BPlusTreeInternalPage *recipient, const KeyType &middle_key,
-                                                      BufferPoolManager *buffer_pool_manager) {}
+                                                      BufferPoolManager *buffer_pool_manager) {
+  recipient->array[recipient->size_] = {middle_key, array[0].second};
+  // 集体前移一位
+  std::move(array + 1, array + size_, array);
+  recipient->BatchChangeChildParentId(recipient->size_, recipient->size_ + 1, buffer_pool_manager);
+  size_--;
+  recipient->size_++;
+}
 
 /* Append an entry at the end.
  * Since it is an internal page, the moved entry(page)'s parent needs to be updated.
@@ -214,7 +237,13 @@ void B_PLUS_TREE_INTERNAL_PAGE_TYPE::CopyLastFrom(const MappingType &pair, Buffe
  */
 INDEX_TEMPLATE_ARGUMENTS
 void B_PLUS_TREE_INTERNAL_PAGE_TYPE::MoveLastToFrontOf(BPlusTreeInternalPage *recipient, const KeyType &middle_key,
-                                                       BufferPoolManager *buffer_pool_manager) {}
+                                                       BufferPoolManager *buffer_pool_manager) {
+  std::move_backward(recipient->array, recipient->array + recipient->size_, recipient->array + recipient->size_ + 1);
+  recipient->array[0] = {middle_key, array[size_ - 1].second};
+  recipient->BatchChangeChildParentId(0, 1, buffer_pool_manager);
+  recipient->size_++;
+  size_--;
+}
 
 /* Append an entry at the beginning.
  * Since it is an internal page, the moved entry(page)'s parent needs to be updated.

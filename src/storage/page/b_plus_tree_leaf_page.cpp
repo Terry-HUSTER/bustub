@@ -108,6 +108,7 @@ void B_PLUS_TREE_LEAF_PAGE_TYPE::MoveHalfTo(BPlusTreeLeafPage *recipient) {
   // 别忘更新两个节点的 next page id
   recipient->next_page_id_ = next_page_id_;
   next_page_id_ = recipient->page_id_;
+  // LOG_DEBUG("set next page id: %d -> %d -> %d", page_id_, next_page_id_, recipient->next_page_id_);
 }
 
 /*
@@ -152,13 +153,15 @@ INDEX_TEMPLATE_ARGUMENTS
 int B_PLUS_TREE_LEAF_PAGE_TYPE::RemoveAndDeleteRecord(const KeyType &key, const KeyComparator &comparator) {
   int id = BiSearch(key, comparator);
   if (id >= size_ || comparator(array[id].first, key) != 0) {
-    // 目前失败也返回 id
-    LOG_DEBUG("delete leaf page key fail");
+    // 目前失败直接退出
+    LOG_DEBUG("delete leaf page %d key %ld fail, id %d found key %ld size %d", page_id_, key.ToString(), id, array[id].first.ToString(), size_);
+    abort();
     return id;
   } else {
     // 集体前移
     std::move(array + id + 1, array + size_, array + id);
     size_--;
+    // LOG_DEBUG("delete leaf page %d key %ld id %d size %d succ, after key %ld", page_id_, key.ToString(), id, size_, array[id].first.ToString());
     return id;
   }
 }
@@ -172,11 +175,14 @@ int B_PLUS_TREE_LEAF_PAGE_TYPE::RemoveAndDeleteRecord(const KeyType &key, const 
  */
 INDEX_TEMPLATE_ARGUMENTS
 void B_PLUS_TREE_LEAF_PAGE_TYPE::MoveAllTo(BPlusTreeLeafPage *recipient) {
-  std::move(array, array + size_, recipient->array);
-  recipient->size_ = size_;
+  // 顺序关系 recipent => cur => next
+  // 把该 leaf 的数据都 append 到 recipient 里
+  std::move(array, array + size_, recipient->array + recipient->size_);
+  recipient->size_ += size_;
   size_ = 0;
-  // move 完后 recipient 变成 sibling
-  next_page_id_ = recipient->next_page_id_;
+  // 之后会把当前 page 删除掉，所以 recipient.next_page 指向当前 page 的下一个
+  recipient->next_page_id_ = next_page_id_;
+  // LOG_DEBUG("set next page %d => %d", recipient->GetPageId(), recipient->GetNextPageId());
 }
 
 /*****************************************************************************
@@ -187,10 +193,10 @@ void B_PLUS_TREE_LEAF_PAGE_TYPE::MoveAllTo(BPlusTreeLeafPage *recipient) {
  */
 INDEX_TEMPLATE_ARGUMENTS
 void B_PLUS_TREE_LEAF_PAGE_TYPE::MoveFirstToEndOf(BPlusTreeLeafPage *recipient) {
-  std::move(array, array + 1, recipient->array);
+  // 踩坑：offset 写错过
+  std::move(array, array + 1, recipient->array + recipient->size_);
   // 集体前移一位
-  // 自前向后 move 存在 overlap 现象，故逆序 move
-  std::move_backward(array + 1, array + size_, array + size_ - 1);
+  std::move(array + 1, array + size_, array);
   size_--;
   recipient->size_++;
 }
@@ -209,7 +215,9 @@ void B_PLUS_TREE_LEAF_PAGE_TYPE::CopyLastFrom(const MappingType &item) {
  */
 INDEX_TEMPLATE_ARGUMENTS
 void B_PLUS_TREE_LEAF_PAGE_TYPE::MoveLastToFrontOf(BPlusTreeLeafPage *recipient) {
-  std::move(array + size_ - 1, array + size_, recipient->array);
+  // 踩坑：先腾出空间
+  std::move_backward(recipient->array, recipient->array + recipient->size_, recipient->array + recipient->size_ + 1);
+  recipient->array[0] = array[size_ - 1];
   size_--;
   recipient->size_++;
 }
