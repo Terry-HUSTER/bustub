@@ -26,7 +26,7 @@ BPLUSTREE_TYPE::BPlusTree(std::string name, BufferPoolManager *buffer_pool_manag
       comparator_(comparator),
       leaf_max_size_(leaf_max_size),
       internal_max_size_(internal_max_size) {
-  LOG_DEBUG("b+ tree init, leaf max %d internal max %d", leaf_max_size, internal_max_size);
+  // LOG_DEBUG("b+ tree init, leaf max %d internal max %d", leaf_max_size, internal_max_size);
 }
 
 /*
@@ -48,6 +48,7 @@ bool BPLUSTREE_TYPE::GetValue(const KeyType &key, std::vector<ValueType> *result
   auto *leaf = reinterpret_cast<LeafPage *>(page->GetData());
   ValueType value;
   bool found = leaf->Lookup(key, &value, comparator_);
+  buffer_pool_manager_->UnpinPage(page->GetPageId(), false);
   if (!found) {
     return false;
   } else {
@@ -68,7 +69,6 @@ bool BPLUSTREE_TYPE::GetValue(const KeyType &key, std::vector<ValueType> *result
  */
 INDEX_TEMPLATE_ARGUMENTS
 bool BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transaction *transaction) {
-  LOG_DEBUG("b+ tree insert %ld", key.ToString());
   if (root_page_id_ == INVALID_PAGE_ID) {
     StartNewTree(key, value);
     return true;
@@ -87,8 +87,7 @@ void BPLUSTREE_TYPE::StartNewTree(const KeyType &key, const ValueType &value) {
   page_id_t page_id;
   auto *page = buffer_pool_manager_->NewPage(&page_id);
   if (page == nullptr) {
-    LOG_ERROR("alloc new root page fail");
-    abort();
+    throw Exception(ExceptionType::OUT_OF_MEMORY, "alloc new root page fail");
   }
   // 第一个根节点必然是叶子节点
   auto *leaf = reinterpret_cast<LeafPage *>(page->GetData());
@@ -121,10 +120,10 @@ bool BPLUSTREE_TYPE::InsertIntoLeaf(const KeyType &key, const ValueType &value, 
     return false;
   } else {
     // 插入成功，递归检查分裂
-    LOG_DEBUG("split check page %d size %d max %d", leaf->GetPageId(), leaf->GetSize(), leaf->GetMaxSize());
     if (leaf->GetSize() >= leaf->GetMaxSize()) {
       Split(leaf);
     }
+    buffer_pool_manager_->UnpinPage(page->GetPageId(), true);
     return true;
   }
 }
@@ -141,12 +140,10 @@ template <typename N>
 N *BPLUSTREE_TYPE::Split(N *node) {
   // 满了才能分裂
   assert(node->GetSize() == node->GetMaxSize());
-  LOG_DEBUG("split page %d size %d max %d", node->GetPageId(), node->GetSize(), node->GetMaxSize());
   page_id_t right_page_id;
   auto *right_page = buffer_pool_manager_->NewPage(&right_page_id);
   if (right_page == nullptr) {
-    LOG_ERROR("alloc new internal page fail");
-    abort();
+    throw Exception(ExceptionType::OUT_OF_MEMORY, "alloc new internal page fail");
   }
 
   // 泛型好啊，不管 leaf 还是 internal 都可用 N 表示
@@ -179,7 +176,6 @@ N *BPLUSTREE_TYPE::Split(N *node) {
 INDEX_TEMPLATE_ARGUMENTS
 void BPLUSTREE_TYPE::InsertIntoParent(BPlusTreePage *old_node, const KeyType &key, BPlusTreePage *new_node,
                                       Transaction *transaction) {
-  
   // old_node: split 后的 left child
   // new_node: split 后的 right child
   if (old_node->IsRootPage()) {
@@ -190,21 +186,21 @@ void BPLUSTREE_TYPE::InsertIntoParent(BPlusTreePage *old_node, const KeyType &ke
       LOG_ERROR("alloc new root page fail");
       abort();
     }
-    LOG_DEBUG("insert parent %d left %d right %d key %ld", root_page_id, old_node->GetPageId(), new_node->GetPageId(), key.ToString());
     auto *internal = reinterpret_cast<InternalPage *>(page->GetData());
     internal->Init(root_page_id, INVALID_PAGE_ID, internal_max_size_);
     // 一个变成 left child，一个变成 right child，key 即 right[0]，无 key，但有 value
     // 可以用 1 2 3 4 5 6 这组数据观察下
     // https://www.cs.usfca.edu/~galles/visualization/BPlusTree.html
     internal->PopulateNewRoot(old_node->GetPageId(), key, new_node->GetPageId());
+    // 这里摔了一跤：新增 root 后要更新 parent_page_id
     old_node->SetParentPageId(root_page_id);
     new_node->SetParentPageId(root_page_id);
     root_page_id_ = root_page_id;
     UpdateRootPageId(false);
+    buffer_pool_manager_->UnpinPage(root_page_id, true);
   } else {
     // 普通的 split：把 right 的 page id 登记到 parent
     page_id_t parent_page_id = old_node->GetParentPageId();
-    LOG_DEBUG("insert parent %d left %d right %d key %ld", parent_page_id, old_node->GetPageId(), new_node->GetPageId(), key.ToString());
     auto *page = buffer_pool_manager_->FetchPage(parent_page_id);
     auto *parent = reinterpret_cast<InternalPage *>(page->GetData());
     parent->InsertNodeAfter(old_node->GetPageId(), key, new_node->GetPageId());
@@ -327,6 +323,9 @@ Page *BPLUSTREE_TYPE::FindLeafPage(const KeyType &key, bool leftMost) {
   page_id_t page_id = root_page_id_;
   while (true) {
     Page *page = buffer_pool_manager_->FetchPage(page_id);
+    if (page == nullptr) {
+      throw Exception(ExceptionType::OUT_OF_MEMORY, "FindLeafPage fetch page fail");
+    }
     auto *node = reinterpret_cast<BPlusTreePage *>(page->GetData());
     // leaf 节点: 直接返回。因为还要用，暂且不 unpin
     if (node->IsLeafPage()) {

@@ -78,7 +78,7 @@ const MappingType &B_PLUS_TREE_LEAF_PAGE_TYPE::GetItem(int index) { return array
  */
 INDEX_TEMPLATE_ARGUMENTS
 int B_PLUS_TREE_LEAF_PAGE_TYPE::Insert(const KeyType &key, const ValueType &value, const KeyComparator &comparator) {
-  LOG_DEBUG("insert leaf %d key %ld size %d max %d", page_id_, key.ToString(), size_, max_size_);
+  // LOG_DEBUG("insert leaf %d key %ld size %d max %d", page_id_, key.ToString(), size_, max_size_);
   int id = BiSearch(key, comparator);
   // 本项目 B+ Tree 只支持 unique key，若 key 已存在，直接返回
   if (comparator(array[id].first, key) == 0) {
@@ -108,17 +108,6 @@ void B_PLUS_TREE_LEAF_PAGE_TYPE::MoveHalfTo(BPlusTreeLeafPage *recipient) {
   // 别忘更新两个节点的 next page id
   recipient->next_page_id_ = next_page_id_;
   next_page_id_ = recipient->page_id_;
-
-  std::stringstream ss;
-  ss << "leaf page move left[" << page_id_ << "]: ";
-  for (int i = 0; i < size_; i++) {
-    ss << array[i].first.ToString() << " ";
-  }
-  ss << "right[" << recipient->GetPageId() <<  "]: ";
-  for (int i = 0; i < recipient->size_; i++) {
-    ss << recipient->array[i].first.ToString() << " ";
-  }
-  LOG_DEBUG(ss.str().c_str(), nullptr);
 }
 
 /*

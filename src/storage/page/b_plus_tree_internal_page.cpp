@@ -137,17 +137,6 @@ void B_PLUS_TREE_INTERNAL_PAGE_TYPE::MoveHalfTo(BPlusTreeInternalPage *recipient
   recipient->BatchChangeChildParentId(recipient->size_, recipient->size_ + moved, buffer_pool_manager);
   size_ -= moved;
   recipient->size_ += moved;
-
-  std::stringstream ss;
-  ss << "internal page move left[" << page_id_ << "]: ";
-  for (int i = 0; i < size_; i++) {
-    ss << array[i].first.ToString() << " ";
-  }
-  ss << "right[" << recipient->GetPageId() <<  "]: ";
-  for (int i = 0; i < recipient->size_; i++) {
-    ss << recipient->array[i].first.ToString() << " ";
-  }
-  LOG_DEBUG(ss.str().c_str(), nullptr);
 }
 
 /* Copy entries into me, starting from {items} and copy {size} entries.
