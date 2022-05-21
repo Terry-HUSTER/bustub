@@ -252,6 +252,7 @@ void BPLUSTREE_TYPE::Remove(const KeyType &key, Transaction *transaction) {
 
 INDEX_TEMPLATE_ARGUMENTS
 void BPLUSTREE_TYPE::DeleteEntry(BPlusTreePage *node, KeyType key, Transaction *transaction) {
+  // 先删除指定 key
   if (node->IsLeafPage()) {
     LeafPage *leaf = reinterpret_cast<LeafPage *>(node);
     leaf->RemoveAndDeleteRecord(key, comparator_);
@@ -261,7 +262,9 @@ void BPLUSTREE_TYPE::DeleteEntry(BPlusTreePage *node, KeyType key, Transaction *
     int value_idx = internal->ValueIndex(value);
     internal->Remove(value_idx);
   }
+
   if (node->IsRootPage()) {
+    // 根节点特别处理
     if (AdjustRoot(node)) {
       // 有了新根节点后删除当前节点
       buffer_pool_manager_->UnpinPage(node->GetPageId(), true);
@@ -270,6 +273,7 @@ void BPLUSTREE_TYPE::DeleteEntry(BPlusTreePage *node, KeyType key, Transaction *
     }
     return;
   } else if (node->GetSize() < node->GetMinSize()) {
+    // 非根节点则分为合并和重新调整两种情况
     page_id_t parent_id = node->GetParentPageId();
     if (parent_id == INVALID_PAGE_ID) {
       LOG_ERROR("should never go here!");
@@ -300,8 +304,8 @@ void BPLUSTREE_TYPE::DeleteEntry(BPlusTreePage *node, KeyType key, Transaction *
     // LOG_DEBUG("parent pid %d node pid %d sibling pid %d", parent_node->GetPageId(), node->GetPageId(), sibling_page_id);
     auto *sibling_page = buffer_pool_manager_->FetchPage(sibling_page_id);
     auto *sibling_node = reinterpret_cast<BPlusTreePage *>(sibling_page->GetData());
-    // 是否可以吞并兄弟
     if (node->GetSize() + sibling_node->GetSize() <= node->GetMaxSize()) {
+      // 是否可以吞并兄弟，对应 Coalesce 函数
       // 后合并到前, idx 为前， sibling_idx 为后
       if (idx > sibling_idx) {
         std::swap(sibling_node, node);
@@ -324,6 +328,7 @@ void BPLUSTREE_TYPE::DeleteEntry(BPlusTreePage *node, KeyType key, Transaction *
       DeleteEntry(parent_node, middle_key, transaction);
     } else {
       // 不能吞并兄弟，则重新分布，从兄弟中借一个元素
+      // 对应 Redistribute 函数
       if (sibling_idx < idx) {
         // 从前兄弟末尾取一个
         if (node->IsLeafPage()) {
@@ -365,6 +370,7 @@ void BPLUSTREE_TYPE::DeleteEntry(BPlusTreePage *node, KeyType key, Transaction *
 INDEX_TEMPLATE_ARGUMENTS
 template <typename N>
 bool BPLUSTREE_TYPE::CoalesceOrRedistribute(N *node, Transaction *transaction) {
+  throw std::runtime_error("unimplemented");
   return false;
 }
 
@@ -386,16 +392,6 @@ bool BPLUSTREE_TYPE::Coalesce(N **neighbor_node, N **node,
                               BPlusTreeInternalPage<KeyType, page_id_t, KeyComparator> **parent, int index,
                               Transaction *transaction) {
   throw std::runtime_error("unimplemented");
-
-  if (index == 0) {
-    // node => sibling
-  } else {
-    // sibling => node
-  }
-
-  if (index == 0) {
-  }
-
   return false;
 }
 
@@ -412,13 +408,6 @@ INDEX_TEMPLATE_ARGUMENTS
 template <typename N>
 void BPLUSTREE_TYPE::Redistribute(N *neighbor_node, N *node, int index) {
   throw std::runtime_error("unimplemented");
-  if (index == 0) {
-    // node => sibling
-    neighbor_node->MoveFirstToEndOf(node);
-  } else {
-    // sibling => node
-    neighbor_node->MoveLastToFrontOf(node);
-  }
 }
 /*
  * Update root page if necessary
