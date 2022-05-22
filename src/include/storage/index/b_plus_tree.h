@@ -62,7 +62,9 @@ class BPlusTree {
   INDEXITERATOR_TYPE end();
 
   void Print(BufferPoolManager *bpm) {
+    print_mutex_.lock();
     ToString(reinterpret_cast<BPlusTreePage *>(bpm->FetchPage(root_page_id_)->GetData()), bpm);
+    print_mutex_.unlock();
   }
 
   void Draw(BufferPoolManager *bpm, const std::string &outf) {
@@ -104,7 +106,7 @@ class BPlusTree {
 
   bool AdjustRoot(BPlusTreePage *node);
 
-  void BatchUnpinTransactionWLatch(Transaction* transaction, bool is_dirty = false);
+  void BatchUnpinTransactionWLatch(Transaction *transaction, bool is_dirty = false);
 
   void UnpinLeafPage(BPlusTreePage *node, Page *page, bool delete_page);
 
@@ -112,7 +114,10 @@ class BPlusTree {
 
   void DeleteEntry(BPlusTreePage *node, Page *page, KeyType key, Transaction *transaction);
 
-  Page *FindLeafPageWithOperation(const KeyType &key, bool leftMost, IndexOperationType operation, Transaction *transaction);
+  Page *FindLeafPageWithOperation(const KeyType &key, bool leftMost, IndexOperationType operation,
+                                  Transaction *transaction);
+  Page *FindLeafPageWithOperationInternal(const KeyType &key, bool leftMost, IndexOperationType operation,
+                                          Transaction *transaction);
 
   /* Debug Routines for FREE!! */
   void ToGraph(BPlusTreePage *page, BufferPoolManager *bpm, std::ofstream &out) const;
@@ -130,7 +135,7 @@ class BPlusTree {
   // 多个线程同时判断根节点不存在时，可能各自都会尝试 update root，故访问根节点时也要加锁
   std::mutex root_node_mutex_;
 
-  std::mutex mutex_;
+  std::mutex print_mutex_;
 };
 
 }  // namespace bustub

@@ -9,6 +9,7 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include <unistd.h>
 #include <string>
 
 #include "common/exception.h"
@@ -44,8 +45,6 @@ bool BPLUSTREE_TYPE::IsEmpty() const { return root_page_id_ == INVALID_PAGE_ID; 
  */
 INDEX_TEMPLATE_ARGUMENTS
 bool BPLUSTREE_TYPE::GetValue(const KeyType &key, std::vector<ValueType> *result, Transaction *transaction) {
-  mutex_.lock();
-
   bool ret = false;
   // LOG_DEBUG("QUERY(%ld)", key.ToString());
 
@@ -63,13 +62,15 @@ bool BPLUSTREE_TYPE::GetValue(const KeyType &key, std::vector<ValueType> *result
   if (!found) {
     LOG_DEBUG("not found key %ld", key.ToString());
     // 对于 MixTest2，每次查找都需要命中
-    abort();
+    // abort();
+
+    Print(buffer_pool_manager_);
     ret = false;
   } else {
     result->push_back(value);
     ret = true;
   }
-  mutex_.unlock();
+
   return ret;
 }
 
@@ -85,9 +86,10 @@ bool BPLUSTREE_TYPE::GetValue(const KeyType &key, std::vector<ValueType> *result
  */
 INDEX_TEMPLATE_ARGUMENTS
 bool BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transaction *transaction) {
-  mutex_.lock();
   bool ret = false;
+  // print_mutex_.lock();
   // LOG_DEBUG("INSERT(%ld)", key.ToString());
+  // print_mutex_.unlock();
   root_node_mutex_.lock();
   if (root_page_id_ == INVALID_PAGE_ID) {
     StartNewTree(key, value);
@@ -98,12 +100,9 @@ bool BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transact
     ret = InsertIntoLeaf(key, value, transaction);
   }
 
-  // if ((key.ToString() > 1250 && key.ToString() < 1300) ||
-  //     (key.ToString() %100 == 1 || key.ToString() %100 == 0 || key.ToString() %100 == 50 || key.ToString() %100 ==
-  //     51)) {
+  // if (key.ToString() % 5 == 0) {
   //   Print(buffer_pool_manager_);
   // }
-  mutex_.unlock();
   return ret;
 }
 /*
@@ -119,6 +118,7 @@ void BPLUSTREE_TYPE::StartNewTree(const KeyType &key, const ValueType &value) {
   if (page == nullptr) {
     throw Exception(ExceptionType::OUT_OF_MEMORY, "alloc new root page fail");
   }
+  // LOG_DEBUG("start new tree, page %d", page_id);
   // 第一个根节点必然是叶子节点
   auto *leaf = reinterpret_cast<LeafPage *>(page->GetData());
   leaf->Init(page_id, INVALID_PAGE_ID, leaf_max_size_);
@@ -141,6 +141,12 @@ bool BPLUSTREE_TYPE::InsertIntoLeaf(const KeyType &key, const ValueType &value, 
   bool ret = false;
   // 注释说只支持 unique key，所以如果 key 已存在则直接返回
   Page *page = FindLeafPageWithOperation(key, false, IndexOperationType::INSERT, transaction);
+  if (page == nullptr) {
+    throw Exception(ExceptionType::OUT_OF_MEMORY, "FindLeafPage fetch page insert fail");
+  }
+  // print_mutex_.lock();
+  // LOG_DEBUG("lock leaf %d key %ld", page->GetPageId(), key.ToString());
+  // print_mutex_.unlock();
   auto *leaf = reinterpret_cast<LeafPage *>(page->GetData());
   // 插入前节点不应该是满的
   if (leaf->GetSize() >= leaf->GetMaxSize()) {
@@ -158,15 +164,25 @@ bool BPLUSTREE_TYPE::InsertIntoLeaf(const KeyType &key, const ValueType &value, 
     ret = false;
   } else {
     // 插入成功，递归检查分裂
+    // print_mutex_.lock();
+    // LOG_DEBUG("insert leaf %d succ, key %ld", page->GetPageId(), key.ToString());
+    // print_mutex_.unlock();
     // LOG_DEBUG("after insert page %d size %d max size %d", leaf->GetPageId(), leaf->GetSize(), leaf->GetMaxSize());
     if (leaf->GetSize() >= leaf->GetMaxSize()) {
+      // print_mutex_.lock();
+      // LOG_DEBUG("after insert %ld: ", key.ToString());
+      // ToString(leaf, buffer_pool_manager_);
+      // print_mutex_.unlock();
       Split(leaf);
     }
     ret = true;
   }
 
-  page->WUnlatch();
-  buffer_pool_manager_->UnpinPage(page->GetPageId(), true);
+  // print_mutex_.lock();
+  // LOG_DEBUG("unlock leaf %d key %ld", page->GetPageId(), key.ToString());
+  // print_mutex_.unlock();
+  // page->WUnlatch();
+  // buffer_pool_manager_->UnpinPage(page->GetPageId(), true);
   // 不一定全部是脏页，但只要叶子节点一定是
   BatchUnpinTransactionWLatch(transaction, true);
   return ret;
@@ -189,9 +205,10 @@ N *BPLUSTREE_TYPE::Split(N *node) {
   if (right_page == nullptr) {
     throw Exception(ExceptionType::OUT_OF_MEMORY, "alloc new internal page fail");
   }
-
-  // LOG_DEBUG("Split Before");
+  // print_mutex_.lock();
+  // LOG_DEBUG("Split Before, new page %d", right_page_id);
   // ToString(node, buffer_pool_manager_);
+  // print_mutex_.unlock();
 
   // 泛型好啊，不管 leaf 还是 internal 都可用 N 表示
   auto *right_node = reinterpret_cast<N *>(right_page->GetData());
@@ -205,9 +222,11 @@ N *BPLUSTREE_TYPE::Split(N *node) {
     internal->MoveHalfTo((InternalPage *)right_node, buffer_pool_manager_);
   }
 
+  // print_mutex_.lock();
   // LOG_DEBUG("Split After");
   // ToString(node, buffer_pool_manager_);
   // ToString(right_node, buffer_pool_manager_);
+  // print_mutex_.unlock();
 
   // 分裂后把 middle key 插入到 parent 中
   InsertIntoParent(node, right_node->KeyAt(0), right_node);
@@ -230,15 +249,18 @@ void BPLUSTREE_TYPE::InsertIntoParent(BPlusTreePage *old_node, const KeyType &ke
                                       Transaction *transaction) {
   // old_node: split 后的 left child
   // new_node: split 后的 right child
+  root_node_mutex_.lock();
   if (old_node->IsRootPage()) {
     // 特殊的 split：把 root 也撑爆了，创造一个新 root
-    root_node_mutex_.lock();
     page_id_t root_page_id;
     auto *page = buffer_pool_manager_->NewPage(&root_page_id);
     if (page == nullptr) {
       LOG_ERROR("alloc new root page fail");
       abort();
     }
+    // print_mutex_.lock();
+    // LOG_DEBUG("root page overflow, page %d", root_page_id);
+    // print_mutex_.unlock();
     auto *internal = reinterpret_cast<InternalPage *>(page->GetData());
     internal->Init(root_page_id, INVALID_PAGE_ID, internal_max_size_);
     // 一个变成 left child，一个变成 right child，key 即 right[0]，无 key，但有 value
@@ -253,6 +275,7 @@ void BPLUSTREE_TYPE::InsertIntoParent(BPlusTreePage *old_node, const KeyType &ke
     buffer_pool_manager_->UnpinPage(root_page_id, true);
     root_node_mutex_.unlock();
   } else {
+    root_node_mutex_.unlock();
     // 普通的 split：把 right 的 page id 登记到 parent
     page_id_t parent_page_id = old_node->GetParentPageId();
     auto *parent_page = buffer_pool_manager_->FetchPage(parent_page_id);
@@ -284,8 +307,6 @@ void BPLUSTREE_TYPE::InsertIntoParent(BPlusTreePage *old_node, const KeyType &ke
  */
 INDEX_TEMPLATE_ARGUMENTS
 void BPLUSTREE_TYPE::Remove(const KeyType &key, Transaction *transaction) {
-  mutex_.lock();
-
   // LOG_DEBUG("REMOVE(%ld)", key.ToString());
   // 删除的逻辑完全参考自 《数据库系统概念》B+ Tree 那节的几幅伪代码图片
   if (root_page_id_ == INVALID_PAGE_ID) {
@@ -293,7 +314,7 @@ void BPLUSTREE_TYPE::Remove(const KeyType &key, Transaction *transaction) {
   }
   Page *page = FindLeafPageWithOperation(key, false, IndexOperationType::REMOVE, transaction);
   if (page == nullptr) {
-    throw Exception(ExceptionType::OUT_OF_MEMORY, "FindLeafPage fetch page fail");
+    throw Exception(ExceptionType::OUT_OF_MEMORY, "FindLeafPage fetch page remove fail");
   }
   auto *node = reinterpret_cast<BPlusTreePage *>(page->GetData());
   auto *leaf = reinterpret_cast<LeafPage *>(page->GetData());
@@ -308,7 +329,6 @@ void BPLUSTREE_TYPE::Remove(const KeyType &key, Transaction *transaction) {
   //     51)) {
   //   Print(buffer_pool_manager_);
   // }
-  mutex_.unlock();
 }
 
 INDEX_TEMPLATE_ARGUMENTS
@@ -432,14 +452,12 @@ void BPLUSTREE_TYPE::DeleteEntry(BPlusTreePage *node, Page *page, KeyType key, T
 
 INDEX_TEMPLATE_ARGUMENTS
 void BPLUSTREE_TYPE::UnpinLeafPage(BPlusTreePage *node, Page *page, bool delete_page) {
-  // 叶子节点手动释放
-  if (node->IsLeafPage()) {
-    page->WUnlatch();
-  }
-  // 删除过 key 的节点必为脏页
-  buffer_pool_manager_->UnpinPage(node->GetPageId(), true);
-  if (delete_page) {
-  }
+  // // 叶子节点手动释放
+  // if (node->IsLeafPage()) {
+  //   page->WUnlatch();
+  // }
+  // // 删除过 key 的节点必为脏页
+  // buffer_pool_manager_->UnpinPage(node->GetPageId(), delete_page);
 }
 
 /*
@@ -580,22 +598,48 @@ Page *BPLUSTREE_TYPE::FindLeafPage(const KeyType &key, bool leftMost) {
   return FindLeafPageWithOperation(key, leftMost, IndexOperationType::SEARCH, nullptr);
 }
 
-// carbbing protocol 需要根据不同操作使用不同类型的锁，所以另起一个 FindLeafPage 函数
 INDEX_TEMPLATE_ARGUMENTS
 Page *BPLUSTREE_TYPE::FindLeafPageWithOperation(const KeyType &key, bool leftMost, IndexOperationType operation,
                                                 Transaction *transaction) {
+  // 因为 find 过程中根节点可能被破坏，所以破坏后重试一下
+  Page *ret = nullptr;
+  while(1) {
+    ret = FindLeafPageWithOperationInternal(key, leftMost, operation, transaction);
+    if (ret != nullptr) {
+      break;
+    }
+    usleep(10 * 1000);
+    // LOG_DEBUG("retry");
+  }
+  return ret;
+}
+
+// carbbing protocol 需要根据不同操作使用不同类型的锁，所以另起一个 FindLeafPage 函数
+INDEX_TEMPLATE_ARGUMENTS
+Page *BPLUSTREE_TYPE::FindLeafPageWithOperationInternal(const KeyType &key, bool leftMost, IndexOperationType operation,
+                                                        Transaction *transaction) {
   // 自 root 向下查询，直到 leaf
+  // root_node_mutex_.lock();
   page_id_t page_id = root_page_id_;
   Page *parent_page = nullptr;
+  bool first_loop = true;
   while (true) {
     Page *page = buffer_pool_manager_->FetchPage(page_id);
     if (page == nullptr) {
-      throw Exception(ExceptionType::OUT_OF_MEMORY, "FindLeafPage fetch page fail");
+      throw Exception(ExceptionType::OUT_OF_MEMORY, "FindLeafPageWithOperationInternal fetch page fail");
     }
     auto *node = reinterpret_cast<BPlusTreePage *>(page->GetData());
     if (operation == IndexOperationType::SEARCH) {
       // 访问到新节点时立刻上锁
       page->RLatch();
+      if (first_loop && page_id != root_page_id_) {
+        // 上完锁后发现根节点变了：直接返回，进行重试
+        page->RUnlatch();
+        buffer_pool_manager_->UnpinPage(page->GetPageId(), false);
+        return nullptr;
+      } else {
+        first_loop = false;
+      }
       // 子节点加锁后即可释放父节点
       if (parent_page != nullptr) {
         parent_page->RUnlatch();
@@ -603,28 +647,40 @@ Page *BPLUSTREE_TYPE::FindLeafPageWithOperation(const KeyType &key, bool leftMos
       }
       // 不论如何都要更新 parent
       parent_page = page;
+
     } else {
       // carbbing protocol
       // 在自顶向下遍历 B+ 树时，锁住连续的多个节点。
       // 在找到一个安全节点后释放刚才锁住的节点，再向下连续上锁。
       // 遍历到了不安全的叶子节点后，它在分裂或合并时可能影响到的所有节点就都被锁住了。
+
+      // 加锁当前 => 解锁祖先 => 更新 page set
+      page->WLatch();
+      if (first_loop && page_id != root_page_id_) {
+        // 上完锁后发现根节点变了：直接返回，进行重试
+        page->WUnlatch();
+        buffer_pool_manager_->UnpinPage(page->GetPageId(), false);
+        return nullptr;
+      } else {
+        first_loop = false;
+      }
       if (operation == IndexOperationType::INSERT) {
         // 插入操作要保证不分裂，所以未满的节点为安全节点
-        if (node->GetSize() < node->GetMaxSize() - 1) {
+        if (node->GetSize() < node->GetMaxSize() - 2) {
           BatchUnpinTransactionWLatch(transaction);
         }
       } else if (operation == IndexOperationType::REMOVE) {
         // 删除操作要保证不合并，所以不处于半满的节点为安全节点
-        if (node->GetSize() * 2 > node->GetMinSize()) {
+        if (node->GetSize() > node->GetMinSize()) {
           BatchUnpinTransactionWLatch(transaction);
         }
       }
-      page->WLatch();
-      // 旧代码里已经写好了叶子节点处理逻辑，为了兼容这里就不插入叶子节点了
-      if (!node->IsLeafPage()) {
-        transaction->AddIntoPageSet(page);
-      }
+      // // 旧代码里已经写好了叶子节点处理逻辑，为了兼容这里就不插入叶子节点了
+      // if (!node->IsLeafPage()) {
+      transaction->AddIntoPageSet(page);
+      // }
     }
+
     // leaf 节点: 直接返回。因为还要用，暂且不 unpin
     if (node->IsLeafPage()) {
       return page;
@@ -632,6 +688,7 @@ Page *BPLUSTREE_TYPE::FindLeafPageWithOperation(const KeyType &key, bool leftMos
     // internal 节点：二分定位 child page id
     auto *internal = reinterpret_cast<InternalPage *>(node);
     page_id = leftMost ? internal->ValueAt(0) : internal->Lookup(key, comparator_);
+    first_loop = false;
   }
 }
 
