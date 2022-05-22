@@ -100,6 +100,7 @@ int B_PLUS_TREE_LEAF_PAGE_TYPE::Insert(const KeyType &key, const ValueType &valu
 INDEX_TEMPLATE_ARGUMENTS
 void B_PLUS_TREE_LEAF_PAGE_TYPE::MoveHalfTo(BPlusTreeLeafPage *recipient) {
   // B+ Tree 一定是满了才会分裂
+  // 如果 size_ > max_size_ 肯定是别的地方代码有问题
   assert(size_ == max_size_);
   int moved = max_size_ - GetMinSize();
   std::move(array + GetMinSize(), array + max_size_, recipient->array);
@@ -154,8 +155,8 @@ int B_PLUS_TREE_LEAF_PAGE_TYPE::RemoveAndDeleteRecord(const KeyType &key, const 
   int id = BiSearch(key, comparator);
   if (id >= size_ || comparator(array[id].first, key) != 0) {
     // 目前失败直接退出
-    LOG_DEBUG("delete leaf page %d key %ld fail, id %d found key %ld size %d", page_id_, key.ToString(), id, array[id].first.ToString(), size_);
-    abort();
+    // LOG_DEBUG("delete leaf page %d key %ld fail, id %d found key %ld size %d", page_id_, key.ToString(), id, array[id].first.ToString(), size_);
+    // abort();
     return id;
   } else {
     // 集体前移

@@ -238,7 +238,9 @@ void B_PLUS_TREE_INTERNAL_PAGE_TYPE::CopyLastFrom(const MappingType &pair, Buffe
 INDEX_TEMPLATE_ARGUMENTS
 void B_PLUS_TREE_INTERNAL_PAGE_TYPE::MoveLastToFrontOf(BPlusTreeInternalPage *recipient, const KeyType &middle_key,
                                                        BufferPoolManager *buffer_pool_manager) {
+  // 集体后移一位
   std::move_backward(recipient->array, recipient->array + recipient->size_, recipient->array + recipient->size_ + 1);
+  //TODO: 这里似乎 middle_key == array[size_-1].first
   recipient->array[0] = {middle_key, array[size_ - 1].second};
   recipient->BatchChangeChildParentId(0, 1, buffer_pool_manager);
   recipient->size_++;

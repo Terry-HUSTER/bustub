@@ -23,6 +23,8 @@ namespace bustub {
 
 #define BPLUSTREE_TYPE BPlusTree<KeyType, ValueType, KeyComparator>
 
+enum class IndexOperationType { SEARCH = 0, INSERT, REMOVE };
+
 /**
  * Main class providing the API for the Interactive B+ Tree.
  *
@@ -102,9 +104,15 @@ class BPlusTree {
 
   bool AdjustRoot(BPlusTreePage *node);
 
+  void BatchUnpinTransactionWLatch(Transaction* transaction, bool is_dirty = false);
+
+  void UnpinLeafPage(BPlusTreePage *node, Page *page, bool delete_page);
+
   void UpdateRootPageId(int insert_record = 0);
 
-  void DeleteEntry(BPlusTreePage *node, KeyType key, Transaction *transaction);
+  void DeleteEntry(BPlusTreePage *node, Page *page, KeyType key, Transaction *transaction);
+
+  Page *FindLeafPageWithOperation(const KeyType &key, bool leftMost, IndexOperationType operation, Transaction *transaction);
 
   /* Debug Routines for FREE!! */
   void ToGraph(BPlusTreePage *page, BufferPoolManager *bpm, std::ofstream &out) const;
@@ -118,6 +126,10 @@ class BPlusTree {
   KeyComparator comparator_;
   int leaf_max_size_;
   int internal_max_size_;
+
+  // 多个线程同时判断根节点不存在时，可能各自都会尝试 update root，故访问根节点时也要加锁
+  std::mutex root_node_mutex_;
+
   std::mutex mutex_;
 };
 

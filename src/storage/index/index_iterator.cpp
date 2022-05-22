@@ -22,7 +22,11 @@ INDEXITERATOR_TYPE::IndexIterator(BufferPoolManager *bpm, Page *page, int idx)
 }
 
 INDEX_TEMPLATE_ARGUMENTS
-INDEXITERATOR_TYPE::~IndexIterator() { buffer_pool_manager_->UnpinPage(page_->GetPageId(), false); }
+INDEXITERATOR_TYPE::~IndexIterator() {
+  // 析构时释放读锁。注意 * 运算符返回的是 const 引用，所以这里一定是读锁，不可能是写锁。
+  page_->RUnlatch();
+  buffer_pool_manager_->UnpinPage(page_->GetPageId(), false);
+}
 
 INDEX_TEMPLATE_ARGUMENTS
 bool INDEXITERATOR_TYPE::isEnd() { return leaf_->GetNextPageId() == INVALID_PAGE_ID && idx_ >= leaf_->GetSize(); }
@@ -35,6 +39,10 @@ INDEXITERATOR_TYPE &INDEXITERATOR_TYPE::operator++() {
   // 到达当前 page 尽头，准备迁移到下一个 page
   if (idx_ == leaf_->GetSize() - 1 && leaf_->GetNextPageId() != INVALID_PAGE_ID) {
     auto *next_page = buffer_pool_manager_->FetchPage(leaf_->GetNextPageId());
+
+    // carbbing protocol：锁住后者才能释放前者
+    next_page->RLatch();
+    page_->RUnlatch();
     buffer_pool_manager_->UnpinPage(page_->GetPageId(), false);
     // LOG_DEBUG("iter goto new page %d", next_page->GetPageId());
 
@@ -44,7 +52,8 @@ INDEXITERATOR_TYPE &INDEXITERATOR_TYPE::operator++() {
   } else {
     idx_++;
   }
-  // LOG_DEBUG("iter page %d idx %d key %ld size %d", leaf_->GetPageId(), idx_, leaf_->GetItem(idx_).first.ToString(), leaf_->GetSize());
+  // LOG_DEBUG("iter page %d idx %d key %ld size %d", leaf_->GetPageId(), idx_, leaf_->GetItem(idx_).first.ToString(),
+  // leaf_->GetSize());
   return *this;
 }
 
