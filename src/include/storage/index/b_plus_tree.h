@@ -104,7 +104,7 @@ class BPlusTree {
 
   bool AdjustRoot(BPlusTreePage *node);
 
-  void BatchUnpinTransactionWLatch(Transaction* transaction, bool is_dirty = false);
+  void BatchUnpinTransactionWLatch(Transaction *transaction, bool is_dirty = false);
 
   void UnpinLeafPage(BPlusTreePage *node, Page *page, bool delete_page);
 
@@ -112,7 +112,11 @@ class BPlusTree {
 
   void DeleteEntry(BPlusTreePage *node, Page *page, KeyType key, Transaction *transaction);
 
-  Page *FindLeafPageWithOperation(const KeyType &key, bool leftMost, IndexOperationType operation, Transaction *transaction);
+  /*
+  leaftOrRight: 查找最左节点 -1， 查找最右节点 1，其他 0
+  */
+  Page *FindLeafPageWithOperation(const KeyType &key, IndexOperationType operation, int leftOrRight,
+                                  Transaction *transaction);
 
   /* Debug Routines for FREE!! */
   void ToGraph(BPlusTreePage *page, BufferPoolManager *bpm, std::ofstream &out) const;

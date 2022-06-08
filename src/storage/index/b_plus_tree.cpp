@@ -9,9 +9,11 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include <cstdlib>
 #include <string>
 
 #include "common/exception.h"
+#include "common/logger.h"
 #include "common/rid.h"
 #include "storage/index/b_plus_tree.h"
 #include "storage/page/header_page.h"
@@ -140,7 +142,7 @@ INDEX_TEMPLATE_ARGUMENTS
 bool BPLUSTREE_TYPE::InsertIntoLeaf(const KeyType &key, const ValueType &value, Transaction *transaction) {
   bool ret = false;
   // 注释说只支持 unique key，所以如果 key 已存在则直接返回
-  Page *page = FindLeafPageWithOperation(key, false, IndexOperationType::INSERT, transaction);
+  Page *page = FindLeafPageWithOperation(key, IndexOperationType::INSERT, 0, transaction);
   auto *leaf = reinterpret_cast<LeafPage *>(page->GetData());
   // 插入前节点不应该是满的
   if (leaf->GetSize() >= leaf->GetMaxSize()) {
@@ -291,7 +293,7 @@ void BPLUSTREE_TYPE::Remove(const KeyType &key, Transaction *transaction) {
   if (root_page_id_ == INVALID_PAGE_ID) {
     return;
   }
-  Page *page = FindLeafPageWithOperation(key, false, IndexOperationType::REMOVE, transaction);
+  Page *page = FindLeafPageWithOperation(key, IndexOperationType::REMOVE, 0, transaction);
   if (page == nullptr) {
     throw Exception(ExceptionType::OUT_OF_MEMORY, "FindLeafPage fetch page fail");
   }
@@ -563,9 +565,8 @@ INDEX_TEMPLATE_ARGUMENTS
 INDEXITERATOR_TYPE BPLUSTREE_TYPE::end() {
   // TODO: 优化成 O(log N) 复杂度
   // LOG_DEBUG("call end()");
-  auto iter = begin();
-  while (!iter.isEnd()) ++iter;
-  return iter;
+  auto* page = FindLeafPageWithOperation(KeyType{}, IndexOperationType::SEARCH, 1, nullptr);
+  return INDEXITERATOR_TYPE(buffer_pool_manager_, page, ((LeafPage*)page)->GetSize());
 }
 
 /*****************************************************************************
@@ -577,13 +578,13 @@ INDEXITERATOR_TYPE BPLUSTREE_TYPE::end() {
  */
 INDEX_TEMPLATE_ARGUMENTS
 Page *BPLUSTREE_TYPE::FindLeafPage(const KeyType &key, bool leftMost) {
-  return FindLeafPageWithOperation(key, leftMost, IndexOperationType::SEARCH, nullptr);
+  return FindLeafPageWithOperation(key, IndexOperationType::SEARCH, leftMost ? -1 : 0, nullptr);
 }
 
 // carbbing protocol 需要根据不同操作使用不同类型的锁，所以另起一个 FindLeafPage 函数
 INDEX_TEMPLATE_ARGUMENTS
-Page *BPLUSTREE_TYPE::FindLeafPageWithOperation(const KeyType &key, bool leftMost, IndexOperationType operation,
-                                                Transaction *transaction) {
+Page *BPLUSTREE_TYPE::FindLeafPageWithOperation(const KeyType &key, IndexOperationType operation, int leftOrRight,
+                                                Transaction *transaction) {  
   // 自 root 向下查询，直到 leaf
   page_id_t page_id = root_page_id_;
   Page *parent_page = nullptr;
@@ -631,12 +632,24 @@ Page *BPLUSTREE_TYPE::FindLeafPageWithOperation(const KeyType &key, bool leftMos
     }
     // internal 节点：二分定位 child page id
     auto *internal = reinterpret_cast<InternalPage *>(node);
-    page_id = leftMost ? internal->ValueAt(0) : internal->Lookup(key, comparator_);
+    if (leftOrRight < 0) {
+      // 最左节点
+      page_id = internal->ValueAt(0);
+    } else if (leftOrRight > 0) {
+      // 最右节点
+      page_id = internal->ValueAt(internal->GetSize() - 1);
+    } else {
+      // LOG_DEBUG("not right not life");
+      page_id = internal->Lookup(key, comparator_);
+    }
   }
 }
 
 INDEX_TEMPLATE_ARGUMENTS
 void BPLUSTREE_TYPE::BatchUnpinTransactionWLatch(Transaction *transaction, bool is_dirty) {
+  if (transaction->GetPageSet() == nullptr) {
+    return;
+  }
   for (Page *page : *transaction->GetPageSet()) {
     page->WUnlatch();
     buffer_pool_manager_->UnpinPage(page->GetPageId(), is_dirty);
