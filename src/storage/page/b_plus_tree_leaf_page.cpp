@@ -80,8 +80,8 @@ INDEX_TEMPLATE_ARGUMENTS
 int B_PLUS_TREE_LEAF_PAGE_TYPE::Insert(const KeyType &key, const ValueType &value, const KeyComparator &comparator) {
   // LOG_DEBUG("insert leaf %d key %ld size %d max %d", page_id_, key.ToString(), size_, max_size_);
   int id = BiSearch(key, comparator);
-  // 本项目 B+ Tree 只支持 unique key，若 key 已存在，直接返回
-  if (comparator(array[id].first, key) == 0) {
+  // 本项目 B+ Tree 只支持 unique key，若 page 非空 && key 已存在，直接返回
+  if (size_ > 0 && comparator(array[id].first, key) == 0) {
     return size_;
   }
   // 集体后移一位

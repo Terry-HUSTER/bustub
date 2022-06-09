@@ -64,7 +64,7 @@ bool BPLUSTREE_TYPE::GetValue(const KeyType &key, std::vector<ValueType> *result
   buffer_pool_manager_->UnpinPage(page->GetPageId(), false);
   if (!found) {
     LOG_DEBUG("not found key %ld", key.ToString());
-    // 对于 MixTest2，每次查找都需要命中
+    // 目前遇到的 test case 都使用了非空 key，所以这里遇到空 key 时直接 abort 掉快速定位问题
     abort();
     ret = false;
   } else {
@@ -563,10 +563,8 @@ INDEXITERATOR_TYPE BPLUSTREE_TYPE::Begin(const KeyType &key) {
  */
 INDEX_TEMPLATE_ARGUMENTS
 INDEXITERATOR_TYPE BPLUSTREE_TYPE::end() {
-  // TODO: 优化成 O(log N) 复杂度
-  // LOG_DEBUG("call end()");
-  auto* page = FindLeafPageWithOperation(KeyType{}, IndexOperationType::SEARCH, 1, nullptr);
-  return INDEXITERATOR_TYPE(buffer_pool_manager_, page, ((LeafPage*)page)->GetSize());
+  auto *page = FindLeafPageWithOperation(KeyType{}, IndexOperationType::SEARCH, 1, nullptr);
+  return INDEXITERATOR_TYPE(buffer_pool_manager_, page, ((LeafPage *)page)->GetSize());
 }
 
 /*****************************************************************************
@@ -584,7 +582,7 @@ Page *BPLUSTREE_TYPE::FindLeafPage(const KeyType &key, bool leftMost) {
 // carbbing protocol 需要根据不同操作使用不同类型的锁，所以另起一个 FindLeafPage 函数
 INDEX_TEMPLATE_ARGUMENTS
 Page *BPLUSTREE_TYPE::FindLeafPageWithOperation(const KeyType &key, IndexOperationType operation, int leftOrRight,
-                                                Transaction *transaction) {  
+                                                Transaction *transaction) {
   // 自 root 向下查询，直到 leaf
   page_id_t page_id = root_page_id_;
   Page *parent_page = nullptr;

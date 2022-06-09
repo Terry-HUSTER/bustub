@@ -11,6 +11,7 @@
 #include "storage/index/b_plus_tree_index.h"
 #include "storage/index/index.h"
 #include "storage/table/table_heap.h"
+#include "common/logger.h"
 
 namespace bustub {
 
@@ -76,15 +77,32 @@ class Catalog {
    * @return a pointer to the metadata of the new table
    */
   TableMetadata *CreateTable(Transaction *txn, const std::string &table_name, const Schema &schema) {
+    // 此处的 table 存的是表的 key 和 value，而每个索引存的则是表的 key 和 RID
     BUSTUB_ASSERT(names_.count(table_name) == 0, "Table names should be unique!");
-    return nullptr;
+    auto table_oid = next_table_oid_++;
+    auto table_heap = std::make_unique<TableHeap>(bpm_, lock_manager_, log_manager_, txn);
+    auto table_meta = std::make_unique<TableMetadata>(schema, table_name, std::move(table_heap), table_oid);
+
+    // move 后 unique ptr 就失效了，故次数先拿到 raw ptr
+    auto result = table_meta.get();
+
+    tables_.emplace(result->oid_, std::move(table_meta));
+    names_.emplace(result->name_, result->oid_);
+    return result;
   }
 
   /** @return table metadata by name */
-  TableMetadata *GetTable(const std::string &table_name) { return nullptr; }
+  TableMetadata *GetTable(const std::string &table_name) {
+    // 用 at 代替 [] 来自动抛出 out_of_range 异常
+    // 部分 test case 会检测这个
+    // https://en.cppreference.com/w/cpp/container/unordered_map/at
+    // LOG_DEBUG("query table name %s", table_name.c_str());
+    auto oid = names_.at(table_name);
+    return GetTable(oid);
+  }
 
   /** @return table metadata by oid */
-  TableMetadata *GetTable(table_oid_t table_oid) { return nullptr; }
+  TableMetadata *GetTable(table_oid_t table_oid) { return tables_.at(table_oid).get(); }
 
   /**
    * Create a new index, populate existing data of the table and return its metadata.
@@ -101,12 +119,33 @@ class Catalog {
   IndexInfo *CreateIndex(Transaction *txn, const std::string &index_name, const std::string &table_name,
                          const Schema &schema, const Schema &key_schema, const std::vector<uint32_t> &key_attrs,
                          size_t keysize) {
-    return nullptr;
+    auto index_id = next_index_oid_++;
+    auto index_meta_data = std::make_unique<IndexMetadata>(index_name, table_name, &schema, key_attrs);
+    auto index = std::make_unique<BPLUSTREE_INDEX_TYPE>(index_meta_data.release(), bpm_);
+    auto index_info =
+        std::make_unique<IndexInfo>(key_schema, index_name, std::move(index), index_id, table_name, keysize);
+
+    IndexInfo *result = index_info.get();
+
+    indexes_.emplace(result->index_oid_, std::move(index_info));
+    index_names_[result->table_name_].emplace(result->name_, result->index_oid_);
+
+    auto table_meta = GetTable(table_name);
+    auto table_heap = table_meta->table_.get();
+    // 给表增加新索引时，需要将表中每个 tuple 的 key 和 RID 添加进新索引中
+    for (auto it = table_heap->Begin(txn); it != table_heap->End(); it++) {
+      result->index_->InsertEntry(it->KeyFromTuple(schema, result->key_schema_, result->index_->GetKeyAttrs()),
+                                  it->GetRid(), txn);
+    }
+    return result;
   }
 
-  IndexInfo *GetIndex(const std::string &index_name, const std::string &table_name) { return nullptr; }
+  IndexInfo *GetIndex(const std::string &index_name, const std::string &table_name) {
+    auto oid = index_names_.at(table_name).at(index_name);
+    return GetIndex(oid);
+  }
 
-  IndexInfo *GetIndex(index_oid_t index_oid) { return nullptr; }
+  IndexInfo *GetIndex(index_oid_t index_oid) { return indexes_.at(index_oid).get(); }
 
   std::vector<IndexInfo *> GetTableIndexes(const std::string &table_name) { return std::vector<IndexInfo *>(); }
 
