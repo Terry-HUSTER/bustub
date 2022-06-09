@@ -90,7 +90,7 @@ TEST(GradingCatalogTest, CreateIndexTest) {
 
   Transaction txn(0);
 
-  auto exec_ctx = std::make_unique<ExecutorContext>(&txn, catalog.get(), bpm.get());
+  auto exec_ctx = std::make_unique<ExecutorContext>(&txn, catalog.get(), bpm.get(), nullptr, nullptr);
 
   TableGenerator gen{exec_ctx.get()};
   gen.GenerateTestTables();
