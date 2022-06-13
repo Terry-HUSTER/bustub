@@ -14,6 +14,9 @@
 
 #include <vector>
 
+#include "catalog/catalog.h"
+#include "catalog/schema.h"
+#include "concurrency/transaction.h"
 #include "execution/executor_context.h"
 #include "execution/executors/abstract_executor.h"
 #include "execution/plans/seq_scan_plan.h"
@@ -33,6 +36,8 @@ class SeqScanExecutor : public AbstractExecutor {
    */
   SeqScanExecutor(ExecutorContext *exec_ctx, const SeqScanPlanNode *plan);
 
+  ~SeqScanExecutor() override;
+
   void Init() override;
 
   bool Next(Tuple *tuple, RID *rid) override;
@@ -42,5 +47,8 @@ class SeqScanExecutor : public AbstractExecutor {
  private:
   /** The sequential scan plan node to be executed. */
   const SeqScanPlanNode *plan_;
+  // 用一个 iter 维护每次 next 的位置
+  // 因为 lab 要求里保证是单线程操作，所以不用担心并发修改导致 iter 失效
+  TableIterator* table_iter_;
 };
 }  // namespace bustub
