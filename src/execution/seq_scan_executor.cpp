@@ -10,6 +10,7 @@
 //
 //===----------------------------------------------------------------------===//
 #include "execution/executors/seq_scan_executor.h"
+#include <memory>
 #include "catalog/catalog.h"
 #include "common/rid.h"
 #include "concurrency/transaction.h"
@@ -21,13 +22,9 @@ namespace bustub {
 SeqScanExecutor::SeqScanExecutor(ExecutorContext *exec_ctx, const SeqScanPlanNode *plan)  : AbstractExecutor(exec_ctx), plan_(plan) {
 	// LOG_DEBUG("construct seq scan");
 	// 构造一个指向 table 第一行的 iter
-	auto table_meta_ = exec_ctx_->GetCatalog()->GetTable(plan_->GetTableOid());
+	table_meta_ = exec_ctx_->GetCatalog()->GetTable(plan_->GetTableOid());
 	Transaction txn(0);
-	table_iter_ = new TableIterator(table_meta_->table_->Begin(&txn));
-}
-
-SeqScanExecutor::~SeqScanExecutor() {
-	delete table_iter_;
+	table_iter_ = std::make_unique<TableIterator>(table_meta_->table_->Begin(&txn));
 }
 
 void SeqScanExecutor::Init() {
@@ -38,7 +35,6 @@ bool SeqScanExecutor::Next(Tuple *tuple, RID *rid) {
 	// seq scan 中每次 next 都要找到下一个符合约束条件的 tuple
 	bool ret = true;
 
-	auto table_meta_ = exec_ctx_->GetCatalog()->GetTable(plan_->GetTableOid());
 	while (true) {
 		// 1. 已经到达末尾，直接返回
 		bool reach_end = *table_iter_ == table_meta_->table_->End();
@@ -50,9 +46,10 @@ bool SeqScanExecutor::Next(Tuple *tuple, RID *rid) {
 
 		*tuple = **table_iter_;
 		*rid = (*table_iter_)->GetRid();
-		bool evalute = plan_->GetPredicate()->Evaluate(tuple, plan_->OutputSchema()).GetAs<bool>();
 		// 无论找没找到，只要没到末尾，iter++
 		(*table_iter_)++;
+		
+		bool evalute = plan_->GetPredicate()->Evaluate(tuple, plan_->OutputSchema()).GetAs<bool>();
 		// 2. 直到找到第一个符合约束条件的 
 		if (evalute) {
 			ret = true;

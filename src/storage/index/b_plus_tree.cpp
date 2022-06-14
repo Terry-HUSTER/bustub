@@ -92,6 +92,7 @@ bool BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transact
   // LOG_DEBUG("INSERT(%ld)", key.ToString());
   root_node_mutex_.lock();
   if (root_page_id_ == INVALID_PAGE_ID) {
+    // B+ Tree 为空：创建一个 Root Page 并插入 key value
     StartNewTree(key, value);
     root_node_mutex_.unlock();
     ret = true;

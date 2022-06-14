@@ -12,6 +12,7 @@
 
 #pragma once
 
+#include <memory>
 #include <vector>
 
 #include "catalog/catalog.h"
@@ -36,8 +37,6 @@ class SeqScanExecutor : public AbstractExecutor {
    */
   SeqScanExecutor(ExecutorContext *exec_ctx, const SeqScanPlanNode *plan);
 
-  ~SeqScanExecutor() override;
-
   void Init() override;
 
   bool Next(Tuple *tuple, RID *rid) override;
@@ -47,8 +46,10 @@ class SeqScanExecutor : public AbstractExecutor {
  private:
   /** The sequential scan plan node to be executed. */
   const SeqScanPlanNode *plan_;
+  TableMetadata *table_meta_;
   // 用一个 iter 维护每次 next 的位置
   // 因为 lab 要求里保证是单线程操作，所以不用担心并发修改导致 iter 失效
-  TableIterator* table_iter_;
+  // 智能指针，自动析构
+  std::unique_ptr<TableIterator> table_iter_;
 };
 }  // namespace bustub
