@@ -584,6 +584,10 @@ Page *BPLUSTREE_TYPE::FindLeafPage(const KeyType &key, bool leftMost) {
 INDEX_TEMPLATE_ARGUMENTS
 Page *BPLUSTREE_TYPE::FindLeafPageWithOperation(const KeyType &key, IndexOperationType operation, int leftOrRight,
                                                 Transaction *transaction) {
+  if (IsEmpty()) {
+    LOG_ERROR("find leaf in a empty tree, key %ld", key.ToString());
+    return nullptr;
+  }
   // 自 root 向下查询，直到 leaf
   page_id_t page_id = root_page_id_;
   Page *parent_page = nullptr;

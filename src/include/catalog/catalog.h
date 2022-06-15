@@ -8,10 +8,10 @@
 
 #include "buffer/buffer_pool_manager.h"
 #include "catalog/schema.h"
+#include "common/logger.h"
 #include "storage/index/b_plus_tree_index.h"
 #include "storage/index/index.h"
 #include "storage/table/table_heap.h"
-#include "common/logger.h"
 
 namespace bustub {
 
@@ -137,6 +137,7 @@ class Catalog {
       result->index_->InsertEntry(it->KeyFromTuple(schema, result->key_schema_, result->index_->GetKeyAttrs()),
                                   it->GetRid(), txn);
     }
+    LOG_DEBUG("create table %s index %s succ", table_name.c_str(), index_name.c_str());
     return result;
   }
 
@@ -147,7 +148,20 @@ class Catalog {
 
   IndexInfo *GetIndex(index_oid_t index_oid) { return indexes_.at(index_oid).get(); }
 
-  std::vector<IndexInfo *> GetTableIndexes(const std::string &table_name) { return std::vector<IndexInfo *>(); }
+  std::vector<IndexInfo *> GetTableIndexes(const std::string &table_name) {
+    std::vector<IndexInfo *> ret;
+    // 部分情况下没有 index 就调用该函数，但此时不算是 ERROR
+    if (index_names_.find(table_name) == index_names_.end()) {
+      LOG_DEBUG("GetTableIndexes but table %s not have indexes", table_name.c_str());
+      return ret;
+    }
+    auto index_names = index_names_.at(table_name);
+    for (auto &kv : index_names) {
+      auto oid = kv.second;
+      ret.push_back(GetIndex(oid));
+    }
+    return ret;
+  }
 
  private:
   [[maybe_unused]] BufferPoolManager *bpm_;
