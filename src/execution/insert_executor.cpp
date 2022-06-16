@@ -29,12 +29,12 @@ InsertExecutor::InsertExecutor(ExecutorContext *exec_ctx, const InsertPlanNode *
 }
 
 void InsertExecutor::Init() {
-  // 有的 test case 会在 plan 创建好后再创建索引，所以 index 要在 init 阶段获取，不能在构造函数中获取
-  indexes_ = exec_ctx_->GetCatalog()->GetTableIndexes(table_meta_->name_);
-  // 同样的，需要对 child executor 做初始化
+  // 先对 child executor 做初始化
   if (child_executor_ != nullptr) {
     child_executor_->Init();
   }
+  // 有的 test case 会在 plan 创建好后再创建索引，所以 index 要在 init 阶段获取，不能在构造函数中获取
+  indexes_ = exec_ctx_->GetCatalog()->GetTableIndexes(table_meta_->name_);
 }
 
 bool InsertExecutor::Next([[maybe_unused]] Tuple *tuple, RID *rid) {

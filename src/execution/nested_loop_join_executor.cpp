@@ -39,6 +39,7 @@ bool NestedLoopJoinExecutor::Next(Tuple *tuple, RID *rid) {
     }
   }
 
+  // 跳到第一个符合约束的 left_tuple 和 right_tuple
   do {
     // 到头了吗？
     if (!right_executor_->Next(&right_tuple, &right_rid)) {
