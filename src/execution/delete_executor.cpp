@@ -11,16 +11,46 @@
 //===----------------------------------------------------------------------===//
 #include <memory>
 
+#include "common/logger.h"
 #include "execution/executors/delete_executor.h"
 
 namespace bustub {
 
 DeleteExecutor::DeleteExecutor(ExecutorContext *exec_ctx, const DeletePlanNode *plan,
                                std::unique_ptr<AbstractExecutor> &&child_executor)
-    : AbstractExecutor(exec_ctx) {}
+    : AbstractExecutor(exec_ctx), plan_(plan), child_executor_(std::move(child_executor)) {
+  table_info_ = exec_ctx->GetCatalog()->GetTable(plan_->TableOid());
+}
 
-void DeleteExecutor::Init() {}
+void DeleteExecutor::Init() {
+  if (child_executor_ != nullptr) {
+    child_executor_->Init();
+  }
+  indexes_ = exec_ctx_->GetCatalog()->GetTableIndexes(table_info_->name_);
+}
 
-bool DeleteExecutor::Next([[maybe_unused]] Tuple *tuple, RID *rid) { return false; }
+bool DeleteExecutor::Next([[maybe_unused]] Tuple *tuple, RID *rid) {
+  Tuple delete_tuple;
+  RID delete_rid;
+  if (!child_executor_->Next(&delete_tuple, &delete_rid)) {
+    return false;
+  }
+
+  // 老套路，先更新 table
+  bool deleted = table_info_->table_->MarkDelete(delete_rid, exec_ctx_->GetTransaction());
+  if (!deleted) {
+    LOG_ERROR("delete tuple from table %s rid %s fail", table_info_->name_.c_str(), delete_rid.ToString().c_str());
+    return false;
+  }
+
+  // 再更新 index
+  for (auto *index : indexes_) {
+    Tuple delete_key =
+        delete_tuple.KeyFromTuple(table_info_->schema_, index->key_schema_, index->index_->GetKeyAttrs());
+    index->index_->DeleteEntry(delete_key, delete_rid, exec_ctx_->GetTransaction());
+  }
+
+  return true;
+}
 
 }  // namespace bustub

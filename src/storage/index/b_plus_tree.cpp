@@ -63,9 +63,10 @@ bool BPLUSTREE_TYPE::GetValue(const KeyType &key, std::vector<ValueType> *result
   page->RUnlatch();
   buffer_pool_manager_->UnpinPage(page->GetPageId(), false);
   if (!found) {
-    LOG_DEBUG("not found key %ld", key.ToString());
     // 目前遇到的 test case 都使用了非空 key，所以这里遇到空 key 时直接 abort 掉快速定位问题
-    abort();
+    // 但是部分 test case 会用 GetValue 判断 Remove 是否成功，所以这里改成了只输出一条 log
+    LOG_DEBUG("not found key %ld", key.ToString());
+    // abort();
     ret = false;
   } else {
     result->push_back(value);
