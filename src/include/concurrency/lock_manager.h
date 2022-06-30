@@ -48,6 +48,7 @@ class LockManager {
     std::list<LockRequest> request_queue_;
     std::condition_variable cv_;  // for notifying blocked transactions on this rid
     bool upgrading_ = false;
+    std::mutex mutex_;
   };
 
  public:
@@ -130,6 +131,32 @@ class LockManager {
 
   /** Runs cycle detection in the background. */
   void RunCycleDetection();
+
+ private:
+  /** Can current Transaction grant lock? */
+  static bool CanGrantLock(LockRequestQueue &lock_req_queue, LockMode &lock_mode, txn_id_t txn_id) {
+    // 得到锁的判断条件：
+
+    // // 1. 事务崩了，大家都木大了，但这种情况不该出现
+    // assert(txn->GetState() != TransactionState::ABORTED);
+
+    // 2. 自己已经排到队头了
+    // 这里不用判断 empty，因为上面刚 push 了一个进去
+    if (lock_req_queue.request_queue_.front().txn_id_ == txn_id) {
+      return true;
+    }
+    // 3. 读操作可并行：自己是 R 锁，并且前面的所有请求都是 R 锁
+    else if (lock_mode == LockManager::LockMode::SHARED) {
+      // 反过来说就是不能有 W 锁
+      for (auto &lock_req : lock_req_queue.request_queue_) {
+        if (lock_req.lock_mode_ == LockManager::LockMode::EXCLUSIVE) {
+          return false;
+        }
+      }
+      return true;
+    }
+    return false;
+  }
 
  private:
   std::mutex latch_;
