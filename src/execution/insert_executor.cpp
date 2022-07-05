@@ -58,7 +58,6 @@ bool InsertExecutor::Next([[maybe_unused]] Tuple *tuple, RID *rid) {
   }
 
   // LOG_DEBUG("begin insert");
-
   // 先插入 table
   // LOG_DEBUG("insert tuple to table %s", table_meta_->name_.c_str());
   bool inserted = table_meta_->table_->InsertTuple(tmp_tuple, &tmp_rid, exec_ctx_->GetTransaction());
@@ -66,6 +65,8 @@ bool InsertExecutor::Next([[maybe_unused]] Tuple *tuple, RID *rid) {
     LOG_ERROR("insert tuple to table failed");
     return false;
   }
+  // 插入成功后知道 RID 才能加写锁
+  exec_ctx_->GetLockManager()->LockWrite(exec_ctx_->GetTransaction(), tmp_rid, WType::INSERT);
 
   // 再插入每个关联的 index，类似 Catalog::CreateIndex
   for (auto *index : indexes_) {
@@ -74,6 +75,7 @@ bool InsertExecutor::Next([[maybe_unused]] Tuple *tuple, RID *rid) {
     // LOG_DEBUG("insert tuple to index %s", index->name_.c_str());
     auto key_tuple = tmp_tuple.KeyFromTuple(table_meta_->schema_, index->key_schema_, index->index_->GetKeyAttrs());
     index->index_->InsertEntry(key_tuple, tmp_rid, exec_ctx_->GetTransaction());
+    exec_ctx_->GetTransaction()->GetIndexWriteSet()->emplace_back(tmp_rid, table_meta_->oid_, WType::INSERT, tmp_tuple, Tuple{}, index->index_oid_, exec_ctx_->GetCatalog());
   }
 
   return true;

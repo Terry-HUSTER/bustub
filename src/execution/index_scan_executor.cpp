@@ -51,6 +51,9 @@ bool IndexScanExecutor::Next(Tuple *tuple, RID *rid) {
 
     bool evaluate = plan_->GetPredicate()->Evaluate(tuple, plan_->OutputSchema()).GetAs<bool>();
     if (evaluate) {
+      // 根据隔离级加读锁
+      exec_ctx_->GetLockManager()->LockRead(exec_ctx_->GetTransaction(), tuple->GetRid());
+
       // 根据 output schema 过滤 tuple
       std::vector<Value> values;
       auto schema = plan_->OutputSchema();

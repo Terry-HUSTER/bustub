@@ -41,6 +41,8 @@ bool UpdateExecutor::Next([[maybe_unused]] Tuple *tuple, RID *rid) {
 
   // 先 update table
   Tuple new_tuple = GenerateUpdatedTuple(old_tuple);
+  // 加写锁
+  exec_ctx_->GetLockManager()->LockWrite(exec_ctx_->GetTransaction(), update_rid, WType::UPDATE);
   bool updated = table_info_->table_->UpdateTuple(new_tuple, update_rid, exec_ctx_->GetTransaction());
   if (!updated) {
     LOG_ERROR("update tuple table %s rid %s fail", table_info_->name_.c_str(), update_rid.ToString().c_str());
@@ -53,6 +55,8 @@ bool UpdateExecutor::Next([[maybe_unused]] Tuple *tuple, RID *rid) {
     index->index_->DeleteEntry(old_key, update_rid, exec_ctx_->GetTransaction());
     auto new_key = new_tuple.KeyFromTuple(table_info_->schema_, index->key_schema_, index->index_->GetKeyAttrs());
     index->index_->InsertEntry(new_key, update_rid, exec_ctx_->GetTransaction());
+    exec_ctx_->GetTransaction()->GetIndexWriteSet()->emplace_back(
+        update_rid, table_info_->oid_, WType::UPDATE, new_tuple, old_tuple, index->index_oid_, exec_ctx_->GetCatalog());
   }
   return true;
 }

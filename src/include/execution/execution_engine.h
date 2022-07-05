@@ -16,6 +16,7 @@
 
 #include "buffer/buffer_pool_manager.h"
 #include "catalog/catalog.h"
+#include "common/logger.h"
 #include "concurrency/transaction_manager.h"
 #include "execution/executor_context.h"
 #include "execution/executor_factory.h"
@@ -51,7 +52,15 @@ class ExecutionEngine {
       }
     } catch (Exception &e) {
       // TODO(student): handle exceptions
+      LOG_DEBUG("catch Exception");
+      txn_mgr_->Abort(txn);
+      return false;
     }
+    catch (TransactionAbortException &e) {
+      LOG_DEBUG("catch TransactionAbortException, reason: %s", e.GetInfo().c_str());
+      txn_mgr_->Abort(txn);
+      return false;
+    } 
 
     return true;
   }

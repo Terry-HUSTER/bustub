@@ -56,6 +56,10 @@ bool NestedLoopJoinExecutor::Next(Tuple *tuple, RID *rid) {
                                                                &right_tuple, right_executor_->GetOutputSchema())
                                                 .GetAs<bool>());
 
+  // 根据隔离级加读锁
+  exec_ctx_->GetLockManager()->LockRead(exec_ctx_->GetTransaction(), left_tuple.GetRid());
+  exec_ctx_->GetLockManager()->LockRead(exec_ctx_->GetTransaction(), right_tuple.GetRid());
+
   // 构造 tuple
   std::vector<Value> values;
   for (const auto &col : plan_->OutputSchema()->GetColumns()) {

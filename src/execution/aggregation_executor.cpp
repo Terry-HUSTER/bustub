@@ -36,6 +36,8 @@ void AggregationExecutor::Init() {
   Tuple tuple;
   RID rid;
   while (child_->Next(&tuple, &rid)) {
+    // 根据隔离级加读锁
+    exec_ctx_->GetLockManager()->LockRead(exec_ctx_->GetTransaction(), rid);
     aht_.InsertCombine(MakeKey(&tuple), MakeVal(&tuple));
   }
 

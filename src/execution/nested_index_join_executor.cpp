@@ -63,6 +63,11 @@ bool NestIndexJoinExecutor::Next(Tuple *tuple, RID *rid) {
                 ->EvaluateJoin(&left_tuple, plan_->OuterTableSchema(), &right_tuple, &table_info_->schema_)
                 .GetAs<bool>());
 
+  
+  // 根据隔离级加读锁
+  exec_ctx_->GetLockManager()->LockRead(exec_ctx_->GetTransaction(), left_tuple.GetRid());
+  exec_ctx_->GetLockManager()->LockRead(exec_ctx_->GetTransaction(), right_tuple.GetRid());
+
   // 构造 tuple
   std::vector<Value> values;
   for (const auto &col : plan_->OutputSchema()->GetColumns()) {

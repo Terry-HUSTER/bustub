@@ -13,6 +13,7 @@
 
 #include "common/logger.h"
 #include "execution/executors/delete_executor.h"
+#include "storage/table/tuple.h"
 
 namespace bustub {
 
@@ -36,6 +37,8 @@ bool DeleteExecutor::Next([[maybe_unused]] Tuple *tuple, RID *rid) {
     return false;
   }
 
+  // 加写锁
+  exec_ctx_->GetLockManager()->LockWrite(exec_ctx_->GetTransaction(), delete_rid, WType::DELETE);
   // 老套路，先更新 table
   bool deleted = table_info_->table_->MarkDelete(delete_rid, exec_ctx_->GetTransaction());
   if (!deleted) {
@@ -48,6 +51,7 @@ bool DeleteExecutor::Next([[maybe_unused]] Tuple *tuple, RID *rid) {
     Tuple delete_key =
         delete_tuple.KeyFromTuple(table_info_->schema_, index->key_schema_, index->index_->GetKeyAttrs());
     index->index_->DeleteEntry(delete_key, delete_rid, exec_ctx_->GetTransaction());
+    exec_ctx_->GetTransaction()->GetIndexWriteSet()->emplace_back(delete_rid, table_info_->oid_, WType::DELETE, delete_tuple, Tuple{}, index->index_oid_, exec_ctx_->GetCatalog());
   }
 
   return true;

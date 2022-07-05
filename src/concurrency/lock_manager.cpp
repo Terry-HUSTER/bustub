@@ -147,7 +147,7 @@ bool LockManager::LockUpgrade(Transaction *txn, const RID &rid) {
   // 先把锁升级，然后拿 W 锁
   auto lock_mode = LockMode::EXCLUSIVE;
   iter->lock_mode_ = lock_mode;
-  iter->granted_ = true;
+  iter->granted_ = false;
   lock_req_queue.cv_.wait(queue_lock, [&lock_req_queue, &lock_mode, &txn] {
     return CanGrantLock(lock_req_queue, lock_mode, txn->GetTransactionId()) ||
            txn->GetState() == TransactionState::ABORTED;
@@ -208,6 +208,35 @@ bool LockManager::Unlock(Transaction *txn, const RID &rid) {
 
   // LOG_DEBUG("UNLOCK txn %d rid %s ", txn->GetTransactionId(), rid.ToString().c_str());
   return true;
+}
+
+void LockManager::LockRead(Transaction *txn, const RID &rid) {
+  // LOG_DEBUG("lock read start %d rid %lu", txn->GetTransactionId(), rid.Get());
+  switch (txn->GetIsolationLevel()) {
+    case IsolationLevel::READ_UNCOMMITTED:
+      // RU 读不加锁
+      break;
+    case IsolationLevel::READ_COMMITTED:
+      // RC 读完就可以释放锁
+      LockShared(txn, rid);
+      Unlock(txn, rid);
+      break;
+    case IsolationLevel::REPEATABLE_READ:
+      // RR 遵循 2PL，先加锁，最后一块儿释放锁
+      LockShared(txn, rid);
+      break;
+  }
+  // LOG_DEBUG("lock read end %d, rid %lu", txn->GetTransactionId(), rid.Get());
+}
+
+void LockManager::LockWrite(Transaction *txn, const RID &rid, WType wtype) {
+  // LOG_DEBUG("lock write start %d rid %lu", txn->GetTransactionId(), rid.Get());
+  if (txn->IsSharedLocked(rid)) {
+    LockUpgrade(txn, rid);
+  } else if (!txn->IsExclusiveLocked(rid)) {
+    LockExclusive(txn, rid);
+  }
+  // LOG_DEBUG("lock write end %d rid %lu", txn->GetTransactionId(), rid.Get());
 }
 
 void LockManager::AddEdge(txn_id_t t1, txn_id_t t2) { waits_for_[t1].insert(t2); }

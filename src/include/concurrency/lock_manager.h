@@ -135,6 +135,9 @@ class LockManager {
   /** Runs cycle detection in the background. */
   void RunCycleDetection();
 
+  void LockRead(Transaction *txn, const RID &rid);
+  void LockWrite(Transaction *txn, const RID &rid, WType wtype);
+
  private:
   /** Can current Transaction grant lock? */
   static bool CanGrantLock(LockRequestQueue &lock_req_queue, LockMode &lock_mode, txn_id_t txn_id) {
