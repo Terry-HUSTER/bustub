@@ -15,12 +15,15 @@
 #include <algorithm>
 #include <condition_variable>  // NOLINT
 #include <list>
+#include <map>
 #include <memory>
 #include <mutex>  // NOLINT
+#include <set>
 #include <unordered_map>
 #include <utility>
 #include <vector>
 
+#include "common/config.h"
 #include "common/rid.h"
 #include "concurrency/transaction.h"
 
@@ -158,6 +161,10 @@ class LockManager {
     return false;
   }
 
+  bool DFSCheckCycle(txn_id_t txn_id, std::set<txn_id_t> &visited, std::set<txn_id_t> &muilt_graph_visited,
+                     txn_id_t &found_txn_id);
+  void RebuildWaitsForGraph();
+
  private:
   std::mutex latch_;
   std::atomic<bool> enable_cycle_detection_;
@@ -166,7 +173,8 @@ class LockManager {
   /** Lock table for lock requests. */
   std::unordered_map<RID, LockRequestQueue> lock_table_;
   /** Waits-for graph representation. */
-  std::unordered_map<txn_id_t, std::vector<txn_id_t>> waits_for_;
+  // lab 要求按 ID 从小到大 DFS，所以用 map 和 set 有序容器存储
+  std::map<txn_id_t, std::set<txn_id_t>> waits_for_;
 };
 
 }  // namespace bustub

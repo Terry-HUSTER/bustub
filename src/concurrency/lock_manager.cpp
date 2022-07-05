@@ -11,12 +11,15 @@
 //===----------------------------------------------------------------------===//
 
 #include "concurrency/lock_manager.h"
+#include "concurrency/transaction_manager.h"
 
 #include <algorithm>
 #include <mutex>
 #include <sstream>
+#include <unordered_set>
 #include <utility>
 #include <vector>
+#include "common/config.h"
 #include "common/logger.h"
 #include "common/macros.h"
 
@@ -207,20 +210,119 @@ bool LockManager::Unlock(Transaction *txn, const RID &rid) {
   return true;
 }
 
-void LockManager::AddEdge(txn_id_t t1, txn_id_t t2) {}
+void LockManager::AddEdge(txn_id_t t1, txn_id_t t2) { waits_for_[t1].insert(t2); }
 
-void LockManager::RemoveEdge(txn_id_t t1, txn_id_t t2) {}
+void LockManager::RemoveEdge(txn_id_t t1, txn_id_t t2) { waits_for_[t1].erase(t2); }
 
-bool LockManager::HasCycle(txn_id_t *txn_id) { return false; }
+bool LockManager::HasCycle(txn_id_t *txn_id) {
+  std::set<txn_id_t> visited;
+  std::set<txn_id_t> muilt_graph_visited;
+  // 可能有多个连通图，所以要每个没走过的节点做根节点测一遍 DFS
+  for (const auto &kv : waits_for_) {
+    auto start_txn_id = kv.first;
+    if (muilt_graph_visited.find(start_txn_id) == muilt_graph_visited.end()) {
+      bool found = DFSCheckCycle(start_txn_id, visited, muilt_graph_visited, *txn_id);
+      if (found) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
 
-std::vector<std::pair<txn_id_t, txn_id_t>> LockManager::GetEdgeList() { return {}; }
+bool LockManager::DFSCheckCycle(txn_id_t txn_id, std::set<txn_id_t> &visited, std::set<txn_id_t> &muilt_graph_visited,
+                                txn_id_t &found_txn_id) {
+  // LOG_DEBUG("visited txn id %d, wait size: %lu", txn_id, waits_for_[txn_id].size());
+  // 沿着最小事务 ID 遍历，但是遇到环时返回最大的事务 ID
+  for (auto to_txn_id : waits_for_[txn_id]) {
+    if (visited.find(to_txn_id) != visited.end()) {
+      // found
+      found_txn_id = *std::prev(visited.end());
+      // LOG_DEBUG("found cycle, txn: %d", found_txn_id);
+      return true;
+    } else {
+      // not found, dfs
+      visited.insert(to_txn_id);
+      muilt_graph_visited.insert(to_txn_id);
+      if (DFSCheckCycle(to_txn_id, visited, muilt_graph_visited, found_txn_id)) {
+        return true;
+      }
+      visited.erase(to_txn_id);
+    }
+  }
+  return false;
+}
+
+std::vector<std::pair<txn_id_t, txn_id_t>> LockManager::GetEdgeList() {
+  std::vector<std::pair<txn_id_t, txn_id_t>> edges;
+  for (const auto &kv : waits_for_) {
+    auto from = kv.first;
+    for (auto to : kv.second) {
+      edges.emplace_back(from, to);
+    }
+  }
+  return edges;
+}
+
+void LockManager::RebuildWaitsForGraph() {
+  waits_for_.clear();
+  for (const auto &it : lock_table_) {
+    const auto queue = it.second.request_queue_;
+    std::vector<txn_id_t> granted;
+    std::vector<txn_id_t> waiting;
+    for (const auto &lock_req : queue) {
+      const auto txn = TransactionManager::GetTransaction(lock_req.txn_id_);
+      // 忽略 abort
+      if (txn->GetState() == TransactionState::ABORTED) {
+        continue;
+      }
+
+      if (lock_req.granted_) {
+        granted.push_back(lock_req.txn_id_);
+      } else {
+        waiting.push_back(lock_req.txn_id_);
+      }
+    }
+    for (auto from : waiting) {
+      for (auto to : granted) {
+        AddEdge(from, to);
+      }
+    }
+  }
+}
 
 void LockManager::RunCycleDetection() {
   while (enable_cycle_detection_) {
     std::this_thread::sleep_for(cycle_detection_interval);
     {
+      // 每 50ms 一次，取得全局锁，像 java GC 一样 stop the world
       std::unique_lock<std::mutex> l(latch_);
-      // TODO(student): remove the continue and add your cycle detection and abort code here
+      if (!enable_cycle_detection_) {
+        break;
+      }
+
+      // 构建等待图
+      RebuildWaitsForGraph();
+
+      txn_id_t txn_id;
+      while (HasCycle(&txn_id)) {
+        // 破坏等待环
+        auto txn = TransactionManager::GetTransaction(txn_id);
+        txn->SetState(TransactionState::ABORTED);
+
+        // 让等待的线程都动起来
+        for (const auto wait_on_txn_id : waits_for_[txn_id]) {
+          auto wait_on_txn = TransactionManager::GetTransaction(wait_on_txn_id);
+          std::unordered_set<RID> lock_set;
+          lock_set.insert(wait_on_txn->GetSharedLockSet()->begin(), wait_on_txn->GetSharedLockSet()->end());
+          lock_set.insert(wait_on_txn->GetExclusiveLockSet()->begin(), wait_on_txn->GetExclusiveLockSet()->end());
+          for (auto locked_rid : lock_set) {
+            lock_table_[locked_rid].cv_.notify_all();
+          }
+        }
+
+        RebuildWaitsForGraph();
+      }
       continue;
     }
   }
