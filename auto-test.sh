@@ -28,35 +28,35 @@ fi
 
 case $project in
   5)
+    run make -j8 grading_lock_manager_1_test
+    run make -j8 grading_lock_manager_2_test
+    run make -j8 grading_lock_manager_3_test
+    run make -j8 grading_lock_manager_detection_test
     run make -j8 grading_rollback_test
     run make -j8 grading_transaction_test
-    run make -j8 grading_lock_manager_detection_test
-    run make -j8 grading_lock_manager_test_1
-    run make -j8 grading_lock_manager_test_2
-    run make -j8 grading_lock_manager_test_3
+    run ./test/grading_lock_manager_1_test
+    run ./test/grading_lock_manager_2_test
+    run ./test/grading_lock_manager_3_test
+    run ./test/grading_lock_manager_detection_test
     run ./test/grading_rollback_test
     run ./test/grading_transaction_test
-    run ./test/grading_lock_manager_detection_test
-    run ./test/grading_lock_manager_test_1
-    run ./test/grading_lock_manager_test_2
-    run ./test/grading_lock_manager_test_3
-  ;&
+  ;;
   4)
     run make -j8 grading_catalog_test
     run make -j8 grading_executor_test
     run ./test/grading_catalog_test
     run ./test/grading_executor_test
-  ;&
+  ;;
   3)
-    run make -j8 grading_b_plus_tree_checkpoint_2_concurrent_test
     run make -j8 grading_b_plus_tree_checkpoint_2_sequential_test
-    run ./test/grading_b_plus_tree_checkpoint_2_concurrent_test
+    run make -j8 grading_b_plus_tree_checkpoint_2_concurrent_test
     run ./test/grading_b_plus_tree_checkpoint_2_sequential_test
-  ;&
+    run ./test/grading_b_plus_tree_checkpoint_2_concurrent_test
+  ;;
   2)
     run make -j8 grading_b_plus_tree_checkpoint_1_test
     run ./test/grading_b_plus_tree_checkpoint_1_test
-  ;&
+  ;;
   1)  
     run make -j8 lru_replacer_test
     run make -j8 grading_clock_replacer_test
