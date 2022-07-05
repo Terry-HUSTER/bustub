@@ -23,6 +23,8 @@
 namespace bustub {
 
 bool LockManager::LockShared(Transaction *txn, const RID &rid) {
+  // 各个隔离级下加锁解锁的时机参阅 Wikipedia 的“事务隔离”页面
+  // https://zh.m.wikipedia.org/zh-hans/%E4%BA%8B%E5%8B%99%E9%9A%94%E9%9B%A2
   if (txn->GetIsolationLevel() == IsolationLevel::READ_UNCOMMITTED) {
     // RU 隔离级，读操作不需要也不可以加锁
     txn->SetState(TransactionState::ABORTED);
@@ -56,8 +58,15 @@ bool LockManager::LockShared(Transaction *txn, const RID &rid) {
   auto &lock_req = lock_req_queue.request_queue_.emplace_back(txn->GetTransactionId(), lock_mode);
   // 很神奇，直接 CanGrantLock 不行，但包成 lambda 就可以了
   lock_req_queue.cv_.wait(queue_lock, [&lock_req_queue, &lock_mode, &txn] {
-    return CanGrantLock(lock_req_queue, lock_mode, txn->GetTransactionId());
+    return CanGrantLock(lock_req_queue, lock_mode, txn->GetTransactionId()) ||
+           txn->GetState() == TransactionState::ABORTED;
   });
+
+  // 获得锁后发现事务已经崩了，全部木大
+  if (txn->GetState() == TransactionState::ABORTED) {
+    txn->SetState(TransactionState::ABORTED);
+    throw TransactionAbortException(txn->GetTransactionId(), AbortReason::DEADLOCK);
+  }
 
   // 加锁成功
   lock_req.granted_ = true;
@@ -72,26 +81,85 @@ bool LockManager::LockShared(Transaction *txn, const RID &rid) {
 }
 
 bool LockManager::LockExclusive(Transaction *txn, const RID &rid) {
+  // 理由同 LockShared
+  if (txn->GetState() == TransactionState::SHRINKING) {
+    txn->SetState(TransactionState::ABORTED);
+    throw TransactionAbortException(txn->GetTransactionId(), AbortReason::LOCK_ON_SHRINKING);
+  }
+  // 理由同 LockShared
+  if (txn->IsExclusiveLocked(rid)) {
+    return true;
+  }
+
+  latch_.lock();
+  auto &lock_req_queue = lock_table_[rid];
+  latch_.unlock();
+
+  std::unique_lock<std::mutex> queue_lock(lock_req_queue.mutex_);
+  auto lock_mode = LockManager::LockMode::EXCLUSIVE;
+  auto &lock_req = lock_req_queue.request_queue_.emplace_back(txn->GetTransactionId(), lock_mode);
+  lock_req_queue.cv_.wait(queue_lock, [&lock_req_queue, &lock_mode, &txn] {
+    return CanGrantLock(lock_req_queue, lock_mode, txn->GetTransactionId()) ||
+           txn->GetState() == TransactionState::ABORTED;
+  });
+
+  // 获得锁后发现事务已经崩了，全部木大
+  if (txn->GetState() == TransactionState::ABORTED) {
+    txn->SetState(TransactionState::ABORTED);
+    throw TransactionAbortException(txn->GetTransactionId(), AbortReason::DEADLOCK);
+  }
+
+  // 加锁成功
+  lock_req.granted_ = true;
   txn->GetExclusiveLockSet()->emplace(rid);
-
-  // 先只处理 RR
-  assert(txn->GetIsolationLevel() == IsolationLevel::REPEATABLE_READ);
-
-  LOG_DEBUG("LOCK EXCLUSIVE %s", rid.ToString().c_str());
-  abort();
   return true;
 }
 
 bool LockManager::LockUpgrade(Transaction *txn, const RID &rid) {
+  // upgrade 就是将 R 锁转化为为 W 锁的过程
+  // 理由同 LockShared
+  if (txn->GetState() == TransactionState::SHRINKING) {
+    txn->SetState(TransactionState::ABORTED);
+    throw TransactionAbortException(txn->GetTransactionId(), AbortReason::LOCK_ON_SHRINKING);
+  }
+  if (txn->IsExclusiveLocked(rid)) {
+    return true;
+  }
+
+  latch_.lock();
+  auto &lock_req_queue = lock_table_[rid];
+  latch_.unlock();
+
+  std::unique_lock<std::mutex> queue_lock(lock_req_queue.mutex_);
+  if (lock_req_queue.upgrading_) {
+    // 一次只能并发升级一把锁，有别的锁也在升级就 abort
+    txn->SetState(TransactionState::ABORTED);
+    throw TransactionAbortException(txn->GetTransactionId(), AbortReason::UPGRADE_CONFLICT);
+  }
+
+  lock_req_queue.upgrading_ = true;
+  auto iter = std::find_if(lock_req_queue.request_queue_.begin(), lock_req_queue.request_queue_.end(),
+                           [&txn](const auto &lock_req) { return txn->GetTransactionId() == lock_req.txn_id_; });
+
+  // 先把锁升级，然后拿 W 锁
+  auto lock_mode = LockMode::EXCLUSIVE;
+  iter->lock_mode_ = lock_mode;
+  iter->granted_ = true;
+  lock_req_queue.cv_.wait(queue_lock, [&lock_req_queue, &lock_mode, &txn] {
+    return CanGrantLock(lock_req_queue, lock_mode, txn->GetTransactionId()) ||
+           txn->GetState() == TransactionState::ABORTED;
+  });
+
+  if (txn->GetState() == TransactionState::ABORTED) {
+    txn->SetState(TransactionState::ABORTED);
+    throw TransactionAbortException(txn->GetTransactionId(), AbortReason::DEADLOCK);
+  }
+
+  // 上锁成功后取消升级标记
+  iter->granted_ = true;
+  lock_req_queue.upgrading_ = false;
   txn->GetSharedLockSet()->erase(rid);
   txn->GetExclusiveLockSet()->emplace(rid);
-
-  // 先只处理 RR
-  assert(txn->GetIsolationLevel() == IsolationLevel::REPEATABLE_READ);
-
-  LOG_DEBUG("LOCK UPGRADE %s", rid.ToString().c_str());
-  abort();
-
   return true;
 }
 
